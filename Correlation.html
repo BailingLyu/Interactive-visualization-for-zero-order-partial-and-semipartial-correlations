@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Variance & Correlation — An Area Model</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* Okabe-Ito palette — colorblind safe */
+    --c-a: #0072B2;     /* blue        — a */
+    --c-b: #E69F00;     /* orange      — b */
+    --c-c: #CC79A7;     /* reddish-purple — c (triple overlap) */
+    --c-d: #009E73;     /* bluish-green — d */
+    --c-e: #56B4E9;     /* sky blue   — e (x only) */
+    --c-f: #D55E00;     /* vermillion — f (w only) */
+    --c-g: #999999;     /* grey       — g (x∩w outside y) */
+
+    --ink: #1a1814;
+    --ink-soft: #4a453d;
+    --ink-mute: #8a8274;
+    --paper: #f5f1e8;
+    --paper-2: #ebe5d3;
+    --rule: #2a251d;
+    --accent: #b8321a;
+    --highlight: #ffd65a;
+
+    --dim-opacity: 0.12;
+    --normal-opacity: 0.78;
+    --highlight-opacity: 0.95;
+
+    --font-display: 'Fraunces', 'Georgia', serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-image:
+      radial-gradient(1200px 800px at 10% -10%, rgba(184,50,26,0.04), transparent 60%),
+      radial-gradient(1000px 700px at 110% 110%, rgba(0,114,178,0.04), transparent 60%);
+    padding: 48px 32px 64px;
+  }
+
+  .page {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  header.masthead {
+    border-bottom: 1px solid var(--rule);
+    padding: 6px 0 18px;
+    margin-bottom: 36px;
+  }
+  .masthead h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(26px, 3vw, 36px);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    font-style: italic;
+  }
+  .masthead h1 em {
+    font-style: normal;
+    color: var(--accent);
+  }
+
+  /* Single-panel layout */
+  .graphs {
+    display: block;
+  }
+
+  .panel {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    box-shadow: 4px 4px 0 var(--rule);
+    padding: 24px 26px 28px;
+    position: relative;
+  }
+  .panel::before {
+    content: attr(data-figure);
+    position: absolute;
+    top: -10px;
+    left: 22px;
+    background: var(--paper);
+    padding: 0 10px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .panel h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  .panel .caption {
+    font-family: var(--font-display);
+    font-style: italic;
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--paper-2);
+    padding-bottom: 12px;
+  }
+
+  /* Two-column horizontal layout within the panel */
+  .panel-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 40px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .panel-grid { grid-template-columns: 1fr; gap: 32px; }
+  }
+
+  .col-left, .col-right {
+    min-width: 0;
+  }
+
+  /* ---------- Panel: Venn diagram ---------- */
+  .venn-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px;
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 500px) {
+    .venn-wrap { grid-template-columns: 1fr; }
+  }
+
+  .venn-svg-wrap {
+    background:
+      linear-gradient(var(--paper-2) 1px, transparent 1px) 0 0 / 100% 28px,
+      var(--paper);
+    border: 1px solid var(--paper-2);
+    border-radius: 2px;
+    aspect-ratio: 1 / 1;
+    position: relative;
+  }
+  .venn-svg-wrap svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* regions */
+  .region {
+    cursor: pointer;
+    transition: opacity 300ms ease, filter 300ms ease;
+    opacity: var(--normal-opacity);
+    outline: none;
+    pointer-events: visiblePainted;
+  }
+  .region:hover { filter: brightness(1.08) saturate(1.15); }
+  .region.dim { opacity: var(--dim-opacity); }
+  .region.highlight {
+    opacity: var(--highlight-opacity);
+    filter: drop-shadow(0 0 6px rgba(255,214,90,0.7));
+  }
+  .region:focus-visible {
+    filter: drop-shadow(0 0 0 2px var(--ink)) drop-shadow(0 0 6px var(--accent));
+  }
+
+  .circle-outline {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 1.6;
+    pointer-events: none;
+  }
+  .circle-label {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 28px;
+    font-weight: 600;
+    fill: var(--ink);
+    pointer-events: none;
+  }
+  .region-label {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 22px;
+    fill: var(--ink);
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+    transition: opacity 300ms ease;
+  }
+  .region-label.dim { opacity: 0.25; }
+
+  /* Region list */
+  .region-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 4px;
+  }
+  .region-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: 2px;
+    text-align: left;
+    transition: background 150ms ease, border-color 150ms ease;
+  }
+  .region-btn:hover { background: var(--paper-2); }
+  .region-btn:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+  .region-btn[aria-pressed="true"] {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+  .region-btn[aria-pressed="true"] .swatch {
+    box-shadow: 0 0 0 2px var(--paper);
+  }
+  .swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.2);
+  }
+  .region-btn .letter {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 600;
+    font-size: 16px;
+    width: 14px;
+  }
+  .region-btn .name {
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .region-btn[aria-pressed="true"] .name { color: var(--paper-2); }
+
+  .region-clear {
+    margin-top: 6px;
+    padding: 6px 9px;
+    background: transparent;
+    border: 1px dashed var(--ink-mute);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .region-clear:hover { color: var(--ink); border-color: var(--ink); }
+
+  .definition-box {
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--paper-2);
+    border-left: 3px solid var(--accent);
+    min-height: 72px;
+  }
+  .definition-box .def-letter {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 600;
+    font-size: 20px;
+    color: var(--accent);
+    margin-right: 8px;
+  }
+  .definition-box .def-text {
+    font-family: var(--font-display);
+    font-size: 15px;
+    color: var(--ink);
+    line-height: 1.45;
+  }
+
+  /* ---------- Panel 2: Ratio construction ---------- */
+  .mode-toggle {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 18px;
+  }
+  .mode-btn {
+    flex: 1;
+    padding: 11px 8px;
+    background: var(--paper);
+    border: none;
+    border-right: 1px solid var(--rule);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    cursor: pointer;
+    transition: background 150ms ease;
+    letter-spacing: 0.01em;
+  }
+  .mode-btn:last-child { border-right: none; }
+  .mode-btn:hover { background: var(--paper-2); }
+  .mode-btn[aria-pressed="true"] {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .mode-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .formula-display {
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    padding: 16px 20px;
+    margin-bottom: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .formula {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 20px;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .formula .symbol {
+    font-size: 24px;
+  }
+  .formula .frac {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    font-style: normal;
+    font-family: var(--font-display);
+  }
+  .formula .frac .num,
+  .formula .frac .den {
+    padding: 2px 10px;
+    font-size: 16px;
+  }
+  .formula .frac .num { border-bottom: 1.5px solid var(--ink); }
+  .formula .description {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    font-weight: 400;
+  }
+  .ratio-value {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--accent);
+    text-align: right;
+  }
+  .ratio-value .rv-label {
+    display: block;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 2px;
+    font-weight: 400;
+  }
+
+  /* Stage for animation */
+  .stage {
+    background:
+      linear-gradient(var(--paper-2) 1px, transparent 1px) 0 0 / 100% 28px,
+      var(--paper);
+    border: 1px solid var(--paper-2);
+    border-radius: 2px;
+    aspect-ratio: 5 / 3;
+    max-height: 440px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stage svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* SVG slot labels inside stage (numerator / denominator) */
+  text.slot-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    fill: var(--ink-mute);
+    pointer-events: none;
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .ctrl-btn {
+    padding: 9px 14px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 150ms, color 150ms;
+  }
+  .ctrl-btn:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+  .ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ctrl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ctrl-btn.primary {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .ctrl-btn.primary:hover:not(:disabled) {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .ctrl-btn .icon {
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  /* Ghost region (for moved copies in animation) */
+  .ghost {
+    transition: transform 900ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 600ms ease;
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <h1>Variance as <em>area</em></h1>
+    </header>
+
+    <main class="graphs">
+
+      <section class="panel" aria-label="Variance area model">
+
+        <div class="panel-grid">
+          <!-- LEFT COLUMN: Venn + region list + definition -->
+          <div class="col-left">
+
+            <div class="venn-wrap">
+              <div class="venn-svg-wrap">
+            <svg id="venn-svg" viewBox="0 0 500 500" role="img" aria-label="Three-circle Venn diagram showing overlaps between variables x, y, and w">
+              <title>Venn diagram of x, y, and w</title>
+
+              <defs>
+                <!-- Positive clips: inside each circle -->
+                <clipPath id="clip-X"><circle cx="180" cy="210" r="140" /></clipPath>
+                <clipPath id="clip-Y"><circle cx="320" cy="210" r="140" /></clipPath>
+                <clipPath id="clip-W"><circle cx="250" cy="330" r="140" /></clipPath>
+
+                <!-- Masks for EXCLUSION (outside a circle) -->
+                <mask id="not-X" maskUnits="userSpaceOnUse">
+                  <rect width="500" height="500" fill="white"/>
+                  <circle cx="180" cy="210" r="140" fill="black"/>
+                </mask>
+                <mask id="not-Y" maskUnits="userSpaceOnUse">
+                  <rect width="500" height="500" fill="white"/>
+                  <circle cx="320" cy="210" r="140" fill="black"/>
+                </mask>
+                <mask id="not-W" maskUnits="userSpaceOnUse">
+                  <rect width="500" height="500" fill="white"/>
+                  <circle cx="250" cy="330" r="140" fill="black"/>
+                </mask>
+              </defs>
+
+              <!-- e = X only (X ∩ ¬Y ∩ ¬W) -->
+              <!-- Clip to X, then exclude Y and W via nested masks -->
+              <g data-region="e" clip-path="url(#clip-X)">
+                <g mask="url(#not-Y)">
+                  <rect width="500" height="500" fill="var(--c-e)" mask="url(#not-W)" class="region" tabindex="0" role="button" aria-label="Region e: x only, outside y and w"/>
+                </g>
+              </g>
+
+              <!-- b = Y only -->
+              <g data-region="b" clip-path="url(#clip-Y)">
+                <g mask="url(#not-X)">
+                  <rect width="500" height="500" fill="var(--c-b)" mask="url(#not-W)" class="region" tabindex="0" role="button" aria-label="Region b: y only, variance in y not explained by x or w"/>
+                </g>
+              </g>
+
+              <!-- f = W only -->
+              <g data-region="f" clip-path="url(#clip-W)">
+                <g mask="url(#not-X)">
+                  <rect width="500" height="500" fill="var(--c-f)" mask="url(#not-Y)" class="region" tabindex="0" role="button" aria-label="Region f: w only"/>
+                </g>
+              </g>
+
+              <!-- a = X ∩ Y, not W -->
+              <g data-region="a" clip-path="url(#clip-X)">
+                <g clip-path="url(#clip-Y)">
+                  <rect width="500" height="500" fill="var(--c-a)" mask="url(#not-W)" class="region" tabindex="0" role="button" aria-label="Region a: variance in y uniquely associated with x, controlling for w"/>
+                </g>
+              </g>
+
+              <!-- g = X ∩ W, not Y -->
+              <g data-region="g" clip-path="url(#clip-X)">
+                <g clip-path="url(#clip-W)">
+                  <rect width="500" height="500" fill="var(--c-g)" mask="url(#not-Y)" class="region" tabindex="0" role="button" aria-label="Region g: x and w overlap, outside y"/>
+                </g>
+              </g>
+
+              <!-- d = Y ∩ W, not X -->
+              <g data-region="d" clip-path="url(#clip-Y)">
+                <g clip-path="url(#clip-W)">
+                  <rect width="500" height="500" fill="var(--c-d)" mask="url(#not-X)" class="region" tabindex="0" role="button" aria-label="Region d: shared variance between y and w, not x"/>
+                </g>
+              </g>
+
+              <!-- c = X ∩ Y ∩ W (triple overlap) -->
+              <g data-region="c" clip-path="url(#clip-X)">
+                <g clip-path="url(#clip-Y)">
+                  <rect width="500" height="500" fill="var(--c-c)" clip-path="url(#clip-W)" class="region" tabindex="0" role="button" aria-label="Region c: shared variance among x, y, and w"/>
+                </g>
+              </g>
+
+              <!-- Circle outlines on top -->
+              <circle cx="180" cy="210" r="140" class="circle-outline"/>
+              <circle cx="320" cy="210" r="140" class="circle-outline"/>
+              <circle cx="250" cy="330" r="140" class="circle-outline"/>
+
+              <!-- Variable labels -->
+              <text x="70" y="100" class="circle-label">x</text>
+              <text x="420" y="100" class="circle-label">y</text>
+              <text x="250" y="490" class="circle-label">w</text>
+
+              <!-- Region letter labels at true centroids -->
+              <text x="123" y="177" class="region-label" data-label="e">e</text>
+              <text x="377" y="177" class="region-label" data-label="b">b</text>
+              <text x="250" y="397" class="region-label" data-label="f">f</text>
+              <text x="250" y="155" class="region-label" data-label="a">a</text>
+              <text x="168" y="297" class="region-label" data-label="g">g</text>
+              <text x="332" y="297" class="region-label" data-label="d">d</text>
+              <text x="250" y="245" class="region-label" data-label="c">c</text>
+            </svg>
+          </div>
+
+          <aside class="region-list" aria-label="Region list">
+            <button class="region-btn" data-region="a" aria-pressed="false">
+              <span class="swatch" style="background:var(--c-a)"></span>
+              <span class="letter">a</span>
+              <span class="name">y ∩ x, not w</span>
+            </button>
+            <button class="region-btn" data-region="b" aria-pressed="false">
+              <span class="swatch" style="background:var(--c-b)"></span>
+              <span class="letter">b</span>
+              <span class="name">y only</span>
+            </button>
+            <button class="region-btn" data-region="c" aria-pressed="false">
+              <span class="swatch" style="background:var(--c-c)"></span>
+              <span class="letter">c</span>
+              <span class="name">y ∩ x ∩ w</span>
+            </button>
+            <button class="region-btn" data-region="d" aria-pressed="false">
+              <span class="swatch" style="background:var(--c-d)"></span>
+              <span class="letter">d</span>
+              <span class="name">y ∩ w, not x</span>
+            </button>
+            <button class="region-btn" data-region="e" aria-pressed="false">
+              <span class="swatch" style="background:var(--c-e)"></span>
+              <span class="letter">e</span>
+              <span class="name">x only</span>
+            </button>
+            <button class="region-btn" data-region="f" aria-pressed="false">
+              <span class="swatch" style="background:var(--c-f)"></span>
+              <span class="letter">f</span>
+              <span class="name">w only</span>
+            </button>
+            <button class="region-btn" data-region="g" aria-pressed="false">
+              <span class="swatch" style="background:var(--c-g)"></span>
+              <span class="letter">g</span>
+              <span class="name">x ∩ w, not y</span>
+            </button>
+
+            <button class="region-btn" data-region="ac" aria-pressed="false" style="border-top:1px dashed var(--ink-mute); margin-top:4px; padding-top:10px;">
+              <span class="swatch" style="background:linear-gradient(135deg,var(--c-a) 50%,var(--c-c) 50%)"></span>
+              <span class="letter" style="font-size:13px">a+c</span>
+              <span class="name">total y ∩ x</span>
+            </button>
+
+            <button class="region-clear" id="clear-selection">clear selection</button>
+          </aside>
+        </div>
+
+        <div class="definition-box" id="definition-box" role="region" aria-live="polite">
+          <div class="def-text" id="def-text">
+            <em>Click a region to see what it represents.</em>
+          </div>
+        </div>
+          </div><!-- /.col-left -->
+
+          <!-- RIGHT COLUMN: ratio construction -->
+          <div class="col-right">
+
+        <div class="mode-toggle" role="radiogroup" aria-label="Correlation type">
+          <button class="mode-btn" data-mode="zero" aria-pressed="true" role="radio">
+            zero-order r²
+          </button>
+          <button class="mode-btn" data-mode="partial" aria-pressed="false" role="radio">
+            partial r²
+          </button>
+          <button class="mode-btn" data-mode="semi" aria-pressed="false" role="radio">
+            semipartial r²
+          </button>
+        </div>
+
+        <div class="formula-display">
+          <div class="formula" id="formula-main" aria-live="polite">
+            <!-- filled by JS -->
+          </div>
+        </div>
+
+        <div class="stage">
+          <svg id="stage-svg" viewBox="0 0 500 300" role="img" aria-label="Ratio construction">
+            <title>Ratio construction</title>
+          </svg>
+        </div>
+
+        <div class="controls">
+          <button class="ctrl-btn primary" id="btn-play"><span class="icon">▶</span> play</button>
+          <button class="ctrl-btn" id="btn-step"><span class="icon">›</span> step</button>
+          <button class="ctrl-btn" id="btn-reset"><span class="icon">↺</span> reset</button>
+        </div>
+          </div><!-- /.col-right -->
+        </div><!-- /.panel-grid -->
+      </section>
+    </main>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ============ DATA: region definitions ============
+  const REGION_DEFS = {
+    a: {
+      color: 'var(--c-a)',
+      title: 'a — y ∩ x, not w',
+      text: 'Variance in y uniquely associated with x after controlling for w. This is what x explains in y that w cannot.'
+    },
+    b: {
+      color: 'var(--c-b)',
+      title: 'b — y only',
+      text: 'Variance in y not explained by either x or w. What remains in y after controlling for w and accounting for x.'
+    },
+    c: {
+      color: 'var(--c-c)',
+      title: 'c — y ∩ x ∩ w',
+      text: 'Shared variance among all three: the part of y that x and w both explain jointly. Counts toward x\'s zero-order relationship with y.'
+    },
+    d: {
+      color: 'var(--c-d)',
+      title: 'd — y ∩ w, not x',
+      text: 'Variance in y that w explains but x does not. Part of raw y, included in the denominator for zero-order and semipartial r².'
+    },
+    e: {
+      color: 'var(--c-e)',
+      title: 'e — x only',
+      text: 'Variance in x that has no overlap with y or w. Shown for context, not used in the ratios.'
+    },
+    f: {
+      color: 'var(--c-f)',
+      title: 'f — w only',
+      text: 'Variance in w that has no overlap with x or y. Shown for context.'
+    },
+    g: {
+      color: 'var(--c-g)',
+      title: 'g — x ∩ w, not y',
+      text: 'Variance that x and w share but that does not overlap with y. Shown for context.'
+    },
+    ac: {
+      color: 'var(--accent)',
+      title: 'a + c — total y ∩ x',
+      text: 'The full overlap between x and y: everything x is linearly associated with in y, whether or not w is involved. This is the numerator for zero-order r².'
+    }
+  };
+
+  // ============ MEASURE REGION AREAS ============
+  // Rasterize each region from the SVG to get real area ratios.
+  // We do this once at load time.
+  const regionAreas = {};
+  function measureAreas() {
+    // Use a scratch canvas. For each region, draw only that region's shape
+    // using the same circles/masks and count pixels.
+    const size = 250; // half-res is fine
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // circle params scaled to canvas size (from viewBox 500 → size)
+    const s = size / 500;
+    const X = { cx: 180*s, cy: 210*s, r: 140*s };
+    const Y = { cx: 320*s, cy: 210*s, r: 140*s };
+    const W = { cx: 250*s, cy: 330*s, r: 140*s };
+
+    function inCircle(px, py, C) {
+      const dx = px - C.cx, dy = py - C.cy;
+      return dx*dx + dy*dy <= C.r*C.r;
+    }
+
+    const counts = { a:0, b:0, c:0, d:0, e:0, f:0, g:0 };
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const inX = inCircle(x, y, X);
+        const inY = inCircle(x, y, Y);
+        const inW = inCircle(x, y, W);
+        if (inX && inY && inW) counts.c++;
+        else if (inX && inY) counts.a++;
+        else if (inX && inW) counts.g++;
+        else if (inY && inW) counts.d++;
+        else if (inX) counts.e++;
+        else if (inY) counts.b++;
+        else if (inW) counts.f++;
+      }
+    }
+    Object.assign(regionAreas, counts);
+  }
+  measureAreas();
+
+  // ============ PANEL 1: Venn interactivity ============
+  const vennSvg = document.getElementById('venn-svg');
+  const regionBtns = document.querySelectorAll('.region-btn[data-region]');
+  const regions = vennSvg.querySelectorAll('.region');
+  const labels = vennSvg.querySelectorAll('.region-label');
+  const defBox = document.getElementById('def-text');
+  const clearBtn = document.getElementById('clear-selection');
+
+  function setSelection(sel) {
+    // sel is either a single letter, "ac", or null
+    regionBtns.forEach(b => {
+      b.setAttribute('aria-pressed', b.dataset.region === sel ? 'true' : 'false');
+    });
+
+    const active = sel === 'ac' ? ['a','c'] : (sel ? [sel] : null);
+
+    regions.forEach(r => {
+      const id = r.closest('[data-region]').dataset.region;
+      r.classList.remove('dim', 'highlight');
+      if (active) {
+        if (active.includes(id)) r.classList.add('highlight');
+        else r.classList.add('dim');
+      }
+    });
+    labels.forEach(l => {
+      const id = l.dataset.label;
+      l.classList.remove('dim');
+      if (active && !active.includes(id)) l.classList.add('dim');
+    });
+
+    if (sel && REGION_DEFS[sel]) {
+      const d = REGION_DEFS[sel];
+      defBox.innerHTML = `<span class="def-letter">${sel === 'ac' ? 'a+c' : sel}</span>${d.text}`;
+    } else {
+      defBox.innerHTML = `<em>Click a region to see what it represents.</em>`;
+    }
+  }
+
+  regionBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wasActive = btn.getAttribute('aria-pressed') === 'true';
+      setSelection(wasActive ? null : btn.dataset.region);
+    });
+  });
+
+  regions.forEach(r => {
+    const id = r.closest('[data-region]').dataset.region;
+    r.addEventListener('click', () => setSelection(id));
+    r.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setSelection(id);
+      }
+    });
+  });
+
+  clearBtn.addEventListener('click', () => setSelection(null));
+
+  // ============ PANEL 2: Ratio construction ============
+  const stageSvg = document.getElementById('stage-svg');
+  const modeBtns = document.querySelectorAll('.mode-btn');
+  const formulaEl = document.getElementById('formula-main');
+  const btnPlay = document.getElementById('btn-play');
+  const btnStep = document.getElementById('btn-step');
+  const btnReset = document.getElementById('btn-reset');
+
+  const MODES = {
+    zero: {
+      label: 'Zero-order r²',
+      numerator: ['a', 'c'],
+      denominator: ['a', 'b', 'c', 'd'],
+      formulaHTML: `
+        <span class="symbol">r² <sub style="font-size:12px">yx</sub></span>
+        <span>=</span>
+        <span class="frac">
+          <span class="num">a + c</span>
+          <span class="den">a + b + c + d</span>
+        </span>
+      `
+    },
+    partial: {
+      label: 'Partial r²',
+      numerator: ['a'],
+      denominator: ['a', 'b'],
+      formulaHTML: `
+        <span class="symbol">r² <sub style="font-size:12px">yx·w</sub></span>
+        <span>=</span>
+        <span class="frac">
+          <span class="num">a</span>
+          <span class="den">a + b</span>
+        </span>
+      `
+    },
+    semi: {
+      label: 'Semipartial r²',
+      numerator: ['a'],
+      denominator: ['a', 'b', 'c', 'd'],
+      formulaHTML: `
+        <span class="symbol">sr² <sub style="font-size:12px">y(x·w)</sub></span>
+        <span>=</span>
+        <span class="frac">
+          <span class="num">a</span>
+          <span class="den">a + b + c + d</span>
+        </span>
+      `
+    }
+  };
+
+  let currentMode = 'zero';
+  let currentStep = 0;
+  const TOTAL_STEPS = 4;
+  let isPlaying = false;
+  let playTimer = null;
+
+  // Region color map (for stage)
+  const REGION_COLORS = {
+    a: '#0072B2', b: '#E69F00', c: '#CC79A7', d: '#009E73',
+    e: '#56B4E9', f: '#D55E00', g: '#999999'
+  };
+
+  // Stage layout: just numerator and denominator boxes (no mini-venn)
+  // The main Venn in Panel 1 gets highlighted during animation instead.
+  // Stage viewBox is 500x300
+  function buildStage() {
+    // Clear
+    while (stageSvg.firstChild) stageSvg.removeChild(stageSvg.firstChild);
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+
+    function addText(x, y, text, cls) {
+      const t = document.createElementNS(svgNS, 'text');
+      t.setAttribute('x', x); t.setAttribute('y', y);
+      t.setAttribute('class', cls);
+      t.textContent = text;
+      return t;
+    }
+
+    // Numerator area (subtle shaded background, no border)
+    const numBg = document.createElementNS(svgNS, 'rect');
+    numBg.setAttribute('x', 0); numBg.setAttribute('y', 20);
+    numBg.setAttribute('width', 500); numBg.setAttribute('height', 110);
+    numBg.setAttribute('fill', 'var(--paper-2)');
+    numBg.style.opacity = '0.4';
+    numBg.setAttribute('id', 'num-box');
+    stageSvg.appendChild(numBg);
+
+    const numLabel = addText(20, 38, 'numerator', 'slot-label');
+    stageSvg.appendChild(numLabel);
+
+    // Divider (the fraction bar) — more prominent
+    const divider = document.createElementNS(svgNS, 'line');
+    divider.setAttribute('x1', 20); divider.setAttribute('y1', 150);
+    divider.setAttribute('x2', 480); divider.setAttribute('y2', 150);
+    divider.setAttribute('stroke', 'var(--ink)');
+    divider.setAttribute('stroke-width', '2');
+    divider.setAttribute('id', 'ratio-bar');
+    divider.style.opacity = '0.5';
+    stageSvg.appendChild(divider);
+
+    // Denominator area
+    const denBg = document.createElementNS(svgNS, 'rect');
+    denBg.setAttribute('x', 0); denBg.setAttribute('y', 170);
+    denBg.setAttribute('width', 500); denBg.setAttribute('height', 110);
+    denBg.setAttribute('fill', 'var(--paper-2)');
+    denBg.style.opacity = '0.4';
+    denBg.setAttribute('id', 'den-box');
+    stageSvg.appendChild(denBg);
+
+    const denLabel = addText(20, 188, 'denominator', 'slot-label');
+    stageSvg.appendChild(denLabel);
+
+    // Ghost layer (for moving tokens)
+    const ghostLayer = document.createElementNS(svgNS, 'g');
+    ghostLayer.setAttribute('id', 'ghost-layer');
+    stageSvg.appendChild(ghostLayer);
+
+    // Final result layer
+    const resultGroup = document.createElementNS(svgNS, 'g');
+    resultGroup.setAttribute('id', 'result-group');
+    resultGroup.style.opacity = '0';
+    resultGroup.style.transition = 'opacity 400ms ease';
+    stageSvg.appendChild(resultGroup);
+  }
+
+  // Highlight regions in the MAIN Venn (Panel 1) during ratio animation.
+  // exceptIds = [] means: reset everything back to normal.
+  // exceptIds = [...] means: those get highlighted, others get dimmed.
+  function highlightMainVenn(exceptIds = []) {
+    regions.forEach(r => {
+      const id = r.closest('[data-region]').dataset.region;
+      r.classList.remove('dim', 'highlight');
+      if (exceptIds.length > 0) {
+        if (exceptIds.includes(id)) r.classList.add('highlight');
+        else r.classList.add('dim');
+      }
+    });
+    labels.forEach(l => {
+      const id = l.dataset.label;
+      l.classList.remove('dim');
+      if (exceptIds.length > 0 && !exceptIds.includes(id)) l.classList.add('dim');
+    });
+
+    // Also clear region-list button pressed state when animation runs
+    if (exceptIds.length > 0) {
+      regionBtns.forEach(b => b.setAttribute('aria-pressed', 'false'));
+    }
+  }
+
+  // Build a ghost token (small colored disc with letter) that animates to a target
+  function createGhostToken(regionId, startX, startY, targetX, targetY) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const ghostLayer = document.getElementById('ghost-layer');
+
+    const g = document.createElementNS(svgNS, 'g');
+    g.setAttribute('class', 'ghost');
+    g.setAttribute('data-ghost', regionId);
+
+    // Disc
+    const c = document.createElementNS(svgNS, 'circle');
+    c.setAttribute('cx', startX);
+    c.setAttribute('cy', startY);
+    c.setAttribute('r', 18);
+    c.setAttribute('fill', REGION_COLORS[regionId]);
+    c.setAttribute('stroke', 'var(--ink)');
+    c.setAttribute('stroke-width', '1.5');
+    c.style.opacity = '0.92';
+    g.appendChild(c);
+
+    // Letter on the disc
+    const t = document.createElementNS(svgNS, 'text');
+    t.setAttribute('x', startX);
+    t.setAttribute('y', startY);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('dominant-baseline', 'central');
+    t.style.fontSize = '18px';
+    t.style.fontFamily = 'var(--font-display)';
+    t.style.fontWeight = '600';
+    t.style.fontStyle = 'italic';
+    t.style.fill = '#fff';
+    t.style.pointerEvents = 'none';
+    t.textContent = regionId;
+    g.appendChild(t);
+
+    // Start with zero translation, then animate
+    g.style.transform = 'translate(0px, 0px)';
+    g.style.opacity = '0';
+
+    ghostLayer.appendChild(g);
+
+    // Force a frame, then apply final transform and fade in
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const dx = targetX - startX;
+        const dy = targetY - startY;
+        g.style.transform = `translate(${dx}px, ${dy}px)`;
+        g.style.opacity = '1';
+      });
+    });
+
+    return g;
+  }
+
+  function clearGhosts() {
+    const ghostLayer = document.getElementById('ghost-layer');
+    if (ghostLayer) {
+      while (ghostLayer.firstChild) ghostLayer.removeChild(ghostLayer.firstChild);
+    }
+    const resultGroup = document.getElementById('result-group');
+    if (resultGroup) {
+      while (resultGroup.firstChild) resultGroup.removeChild(resultGroup.firstChild);
+      resultGroup.style.opacity = '0';
+    }
+  }
+
+  function getRatioValue(mode) {
+    const m = MODES[mode];
+    const num = m.numerator.reduce((s, k) => s + regionAreas[k], 0);
+    const den = m.denominator.reduce((s, k) => s + regionAreas[k], 0);
+    return { num, den, ratio: num / den };
+  }
+
+  // Arrangement inside numerator/denominator slots (new stage: 500w x 300h)
+  const NUM_BOX = { x: 20, y: 20, w: 460, h: 110, cx: 250, cy: 85 };
+  const DEN_BOX = { x: 20, y: 170, w: 460, h: 110, cx: 250, cy: 215 };
+
+  // Place tokens in a slot, arranged in a row with "+" separators.
+  // Tokens fade/slide in from just outside the left edge of the box.
+  function placeInSlot(regionIds, box) {
+    const n = regionIds.length;
+    const tokenSpacing = 62;
+    const totalWidth = (n - 1) * tokenSpacing;
+    const startX = box.cx - totalWidth / 2;
+
+    regionIds.forEach((id, i) => {
+      const targetX = startX + i * tokenSpacing;
+      const targetY = box.cy;
+      // Start just outside the box to the left, so it slides in
+      createGhostToken(id, box.x - 30, targetY, targetX, targetY);
+
+      // Add "+" sign between tokens (after the slide completes)
+      if (i < n - 1) {
+        setTimeout(() => addPlusSign(targetX + tokenSpacing/2, box.cy), 700);
+      }
+    });
+  }
+
+  function addPlusSign(x, y) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const ghostLayer = document.getElementById('ghost-layer');
+    const t = document.createElementNS(svgNS, 'text');
+    t.setAttribute('x', x);
+    t.setAttribute('y', y);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('dominant-baseline', 'central');
+    t.setAttribute('class', 'ghost plus-sign');
+    t.style.fontSize = '22px';
+    t.style.fontFamily = 'var(--font-display)';
+    t.style.fill = 'var(--ink)';
+    t.style.opacity = '0';
+    t.style.transition = 'opacity 300ms ease';
+    t.textContent = '+';
+    ghostLayer.appendChild(t);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { t.style.opacity = '0.7'; });
+    });
+  }
+
+  // ============ STEP STATE MACHINE ============
+  function setStep(step) {
+    currentStep = step;
+
+    clearGhosts();
+    const mode = MODES[currentMode];
+
+    if (step === 0) {
+      highlightMainVenn([]);
+    } else if (step === 1) {
+      highlightMainVenn(mode.numerator);
+    } else if (step === 2) {
+      highlightMainVenn(mode.numerator);
+      placeInSlot(mode.numerator, NUM_BOX, 'num');
+    } else if (step === 3) {
+      highlightMainVenn([...new Set([...mode.numerator, ...mode.denominator])]);
+      placeInSlot(mode.numerator, NUM_BOX, 'num');
+      placeInSlot(mode.denominator, DEN_BOX, 'den');
+      document.getElementById('ratio-bar').style.opacity = '0.5';
+    } else if (step === 4) {
+      highlightMainVenn([]);
+      drawFinalRatio();
+      document.getElementById('ratio-bar').style.opacity = '0.9';
+    }
+  }
+
+  function drawFinalRatio() {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const resultGroup = document.getElementById('result-group');
+    const mode = MODES[currentMode];
+    const r = getRatioValue(currentMode);
+
+    // Clear any previous
+    while (resultGroup.firstChild) resultGroup.removeChild(resultGroup.firstChild);
+
+    // Numerator bar: sits in the middle of the numerator slot
+    const numY = 60;          // bar top
+    const barH = 36;
+    const numW = NUM_BOX.w - 20;
+    const numX = NUM_BOX.x + 10;
+
+    let offset = numX;
+    const numTotal = r.num;
+    mode.numerator.forEach(id => {
+      const frac = regionAreas[id] / numTotal;
+      const w = frac * numW;
+      const rect = document.createElementNS(svgNS, 'rect');
+      rect.setAttribute('x', offset);
+      rect.setAttribute('y', numY);
+      rect.setAttribute('width', w);
+      rect.setAttribute('height', barH);
+      rect.setAttribute('fill', REGION_COLORS[id]);
+      rect.style.opacity = '0.92';
+      resultGroup.appendChild(rect);
+
+      if (w > 15) {
+        const t = document.createElementNS(svgNS, 'text');
+        t.setAttribute('x', offset + w/2);
+        t.setAttribute('y', numY + barH/2);
+        t.setAttribute('text-anchor', 'middle');
+        t.setAttribute('dominant-baseline', 'central');
+        t.style.fontSize = '14px';
+        t.style.fontFamily = 'var(--font-display)';
+        t.style.fontStyle = 'italic';
+        t.style.fontWeight = '600';
+        t.style.fill = '#fff';
+        t.textContent = id;
+        resultGroup.appendChild(t);
+      }
+      offset += w;
+    });
+
+    // Numerator caption (below bar, inside slot)
+    const numLabelText = document.createElementNS(svgNS, 'text');
+    numLabelText.setAttribute('x', NUM_BOX.cx);
+    numLabelText.setAttribute('y', numY + barH + 18);
+    numLabelText.setAttribute('text-anchor', 'middle');
+    numLabelText.style.fontSize = '12px';
+    numLabelText.style.fontFamily = 'var(--font-mono)';
+    numLabelText.style.fill = 'var(--ink)';
+    numLabelText.textContent = mode.numerator.join(' + ');
+    resultGroup.appendChild(numLabelText);
+
+    // Denominator bar
+    const denY = 210;
+    const denW = DEN_BOX.w - 20;
+    const denX = DEN_BOX.x + 10;
+
+    let offset2 = denX;
+    const denTotal = r.den;
+    mode.denominator.forEach(id => {
+      const frac = regionAreas[id] / denTotal;
+      const w = frac * denW;
+      const isNum = mode.numerator.includes(id);
+      const rect = document.createElementNS(svgNS, 'rect');
+      rect.setAttribute('x', offset2);
+      rect.setAttribute('y', denY);
+      rect.setAttribute('width', w);
+      rect.setAttribute('height', barH);
+      rect.setAttribute('fill', REGION_COLORS[id]);
+      rect.style.opacity = isNum ? '0.95' : '0.28';
+      if (isNum) {
+        rect.setAttribute('stroke', '#1a1814');
+        rect.setAttribute('stroke-width', '1.5');
+      }
+      resultGroup.appendChild(rect);
+
+      if (w > 15) {
+        const t = document.createElementNS(svgNS, 'text');
+        t.setAttribute('x', offset2 + w/2);
+        t.setAttribute('y', denY + barH/2);
+        t.setAttribute('text-anchor', 'middle');
+        t.setAttribute('dominant-baseline', 'central');
+        t.style.fontSize = '14px';
+        t.style.fontFamily = 'var(--font-display)';
+        t.style.fontStyle = 'italic';
+        t.style.fontWeight = '600';
+        t.style.fill = isNum ? '#fff' : 'var(--ink)';
+        t.style.opacity = isNum ? '1' : '0.55';
+        t.textContent = id;
+        resultGroup.appendChild(t);
+      }
+      offset2 += w;
+    });
+
+    // Denominator caption
+    const denLabelText = document.createElementNS(svgNS, 'text');
+    denLabelText.setAttribute('x', DEN_BOX.cx);
+    denLabelText.setAttribute('y', denY + barH + 18);
+    denLabelText.setAttribute('text-anchor', 'middle');
+    denLabelText.style.fontSize = '12px';
+    denLabelText.style.fontFamily = 'var(--font-mono)';
+    denLabelText.style.fill = 'var(--ink)';
+    denLabelText.textContent = mode.denominator.join(' + ');
+    resultGroup.appendChild(denLabelText);
+
+    // Fade in
+    requestAnimationFrame(() => {
+      resultGroup.style.opacity = '1';
+    });
+  }
+
+  function setMode(mode) {
+    currentMode = mode;
+    modeBtns.forEach(b => {
+      b.setAttribute('aria-pressed', b.dataset.mode === mode ? 'true' : 'false');
+    });
+    formulaEl.innerHTML = MODES[mode].formulaHTML;
+    stopPlay();
+    setStep(0);
+  }
+
+  function stopPlay() {
+    if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+    isPlaying = false;
+    btnPlay.innerHTML = '<span class="icon">▶</span> play';
+  }
+
+  function play() {
+    if (isPlaying) { stopPlay(); return; }
+    isPlaying = true;
+    btnPlay.innerHTML = '<span class="icon">❙❙</span> pause';
+
+    if (currentStep >= TOTAL_STEPS) setStep(0);
+
+    function advance() {
+      if (!isPlaying) return;
+      if (currentStep >= TOTAL_STEPS) {
+        stopPlay();
+        return;
+      }
+      setStep(currentStep + 1);
+      playTimer = setTimeout(advance, 1500);
+    }
+    playTimer = setTimeout(advance, 700);
+  }
+
+  function step() {
+    stopPlay();
+    const next = currentStep >= TOTAL_STEPS ? 0 : currentStep + 1;
+    setStep(next);
+  }
+
+  function reset() {
+    stopPlay();
+    setStep(0);
+  }
+
+  // ============ EVENT BINDINGS ============
+  modeBtns.forEach(b => {
+    b.addEventListener('click', () => setMode(b.dataset.mode));
+    b.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const all = Array.from(modeBtns);
+        const idx = all.indexOf(b);
+        all[(idx + 1) % all.length].focus();
+        all[(idx + 1) % all.length].click();
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const all = Array.from(modeBtns);
+        const idx = all.indexOf(b);
+        all[(idx - 1 + all.length) % all.length].focus();
+        all[(idx - 1 + all.length) % all.length].click();
+      }
+    });
+  });
+
+  btnPlay.addEventListener('click', play);
+  btnStep.addEventListener('click', step);
+  btnReset.addEventListener('click', reset);
+
+  // ============ INITIALIZE ============
+  buildStage();
+  setMode('zero');
+  setSelection(null);
+
+})();
+</script>
+</body>
+</html>
